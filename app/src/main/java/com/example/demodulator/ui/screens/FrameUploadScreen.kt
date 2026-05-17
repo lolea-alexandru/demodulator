@@ -8,6 +8,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,10 +18,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.demodulator.decoder.BrightnessProfile
 import com.example.demodulator.decoder.DecoderConfig
+import com.example.demodulator.decoder.FrameDecoder
 import com.example.demodulator.decoder.FrameLoader
 import com.example.demodulator.ui.components.CyberButton
 import com.example.demodulator.ui.theme.NeonRed
@@ -33,6 +38,7 @@ fun FrameUploadScreen(
 
     // State that survives recompositions
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var decodedBits by remember { mutableStateOf<String?>(null) }
 
     // File picker launcher
     val launcher = rememberLauncherForActivityResult(
@@ -40,12 +46,14 @@ fun FrameUploadScreen(
     ) { uri: Uri? ->
         if (uri != null) {
             bitmap = FrameLoader.loadOrientedBitmap(context, uri)
+            decodedBits = null // Reset previous result in case new img picked
         }
     }
 
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -58,28 +66,70 @@ fun FrameUploadScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        if (bitmap == null) {
+
+        val currentBitmap = bitmap // created for smart-casting
+        if (currentBitmap == null) {
             CyberButton(
                 text = "PICK IMAGE",
                 onClick = { launcher.launch("image/*") },
             )
         } else {
-            ImageWithLedOverlay(bitmap = bitmap!!)
+            ImageWithLedOverlay(bitmap = currentBitmap)
+
             Spacer(modifier = Modifier.height(16.dp))
+
+            CyberButton(
+                text = "DECODE",
+                onClick = {
+                    val profile = BrightnessProfile.compute(currentBitmap)
+                    val decoder = FrameDecoder(profile)
+                    decodedBits = decoder.decode()
+                },
+            )
+
             CyberButton(
                 text = "PICK DIFFERENT IMAGE",
                 onClick = { launcher.launch("image/*") },
             )
+
+            // --- Decoded result display ---
+            val bits = decodedBits
+            if (bits != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                DecodedBitsDisplay(bits = bits)
+            }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-        CyberButton(
-            text = "BACK",
-            onClick = onBack,
+            CyberButton(
+                text = "BACK",
+                onClick = onBack,
+            )
+        }
+}
+
+@Composable
+private fun DecodedBitsDisplay(bits: String) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "DECODED (${bits.length} bits)",
+            color = NeonRed,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = bits,
+            color = NeonRed,
+            fontSize = 14.sp,
+            fontFamily = FontFamily.Monospace,
         )
     }
 }
+
 
 @Composable
 private fun ImageWithLedOverlay(bitmap: Bitmap) {
