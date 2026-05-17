@@ -94,7 +94,7 @@ fun MainScreen(onFrameUploadClick: () -> Unit,modifier: Modifier = Modifier) {
         )
 
         CyberButton(
-            text = "LIVE DEBUGGING",
+            text = "LIVE DEMODULATION",
             onClick = { /* never called when disabled */ },
             subtitle = "coming soon (hopefully)",
             enabled = false,
