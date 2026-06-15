@@ -27,11 +27,20 @@ import com.example.demodulator.ui.screens.FrameUploadScreen
 
 enum class Screen { Main, FrameUpload }
 class MainActivity : ComponentActivity() {
+    external fun stringFromCpp(name: String): String
+
+    companion object {
+        init {
+            System.loadLibrary("demodulator")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             DemodulatorTheme {
                 Scaffold { innerPadding ->
+                    Text(text = stringFromCpp("Alex"))
                     AppNavigation(modifier = Modifier.padding(innerPadding))
                 }
             }
@@ -91,13 +100,6 @@ fun MainScreen(onFrameUploadClick: () -> Unit,modifier: Modifier = Modifier) {
         CyberButton(
             text = "VIDEO UPLOAD",
             onClick = { /* TODO */ },
-        )
-
-        CyberButton(
-            text = "LIVE DEMODULATION",
-            onClick = { /* never called when disabled */ },
-            subtitle = "coming soon (hopefully)",
-            enabled = false,
         )
     }
 }
