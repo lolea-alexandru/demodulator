@@ -26,20 +26,8 @@ object FrameLoader {
             )
         } ?: ExifInterface.ORIENTATION_NORMAL
 
-        // Define the rotation degrees of the BITMAP MATRIX.
-        // By default, the bitmap matrix is in landscape (portrait + clockwise 90deg)
-        val rotationDegrees = when (orientation) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-            else -> 0f
-        }
-
-        // No deg => return like so
-        if (rotationDegrees == 0f) return raw
-
-        // Apply the rotation matrix
-        val matrix = Matrix().apply { postRotate(rotationDegrees) }
-        return Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+            println(raw.width)
+            println(raw.height)
+            return raw
     }
 }

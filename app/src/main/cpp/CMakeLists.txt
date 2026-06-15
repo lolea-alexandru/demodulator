@@ -36,3 +36,12 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     # List libraries link to the target library
     android
     log)
+
+find_package(OpenCV REQUIRED)
+include_directories(${OpenCV_INCLUDE_DIRS})
+target_link_libraries(
+        ${CMAKE_PROJECT_NAME} # Replace with the actual name of your C++ library
+        ${OpenCV_LIBS}       # Links all the OpenCV magic
+        log                  # Standard Android logging
+        jnigraphics
+)

@@ -21,8 +21,13 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild {
             cmake {
-                cppFlags += ""
+                cppFlags += "-std=c++14 -frtti -fexceptions"
+                arguments += "-DOpenCV_DIR=${file("../sdk/native/jni").absolutePath}"
             }
+        }
+
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
         }
     }
 

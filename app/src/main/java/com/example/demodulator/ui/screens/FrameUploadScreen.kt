@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.demodulator.OpenCVUtils
 import com.example.demodulator.decoder.BrightnessProfile
 import com.example.demodulator.decoder.DecoderConfig
 import com.example.demodulator.decoder.FrameDecoder
@@ -50,6 +51,18 @@ fun FrameUploadScreen(
         }
     }
 
+    fun processImage(myNullableBitmap: Bitmap?): String {
+        // 1. Check and abort if null
+        if (myNullableBitmap == null) {
+            println("Error: No image selected!")
+            return ""
+        }
+
+        // 2. Kotlin "Smart Casts" myNullableBitmap to non-null here
+        val info = OpenCVUtils.getBitmapInfo(myNullableBitmap)
+        return info
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -57,6 +70,7 @@ fun FrameUploadScreen(
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Text(text = processImage(bitmap))
         Text(
             text = "FRAME UPLOAD",
             color = NeonRed,

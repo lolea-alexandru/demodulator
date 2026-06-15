@@ -40,7 +40,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             DemodulatorTheme {
                 Scaffold { innerPadding ->
-                    Text(text = stringFromCpp("Alex"))
                     AppNavigation(modifier = Modifier.padding(innerPadding))
                 }
             }
