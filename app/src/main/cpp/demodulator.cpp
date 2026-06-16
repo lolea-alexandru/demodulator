@@ -124,8 +124,31 @@ Java_com_example_demodulator_OpenCVUtils_otsuThreshold(
     cv::Mat filled = closed | holes;
     cv::cvtColor(filled, dst, cv::COLOR_GRAY2RGBA);
 
+    /* ============================= CONVEX HULL ============================= */
+    cv::Mat labels, stats, centroids;
+    int numLabels = cv::connectedComponentsWithStats(
+            filled, labels, stats, centroids, 8, CV_32S);
+
+    // Start from 1 => 0 is the background
+    for (int i = 1; i < numLabels; i++) {
+        int area = stats.at<int>(i, cv::CC_STAT_AREA);
+        if (area < 50) continue;                       // drop tiny noise blobs (tune the 50)
+
+        int x = stats.at<int>(i, cv::CC_STAT_LEFT);
+        int y = stats.at<int>(i, cv::CC_STAT_TOP);
+        int w = stats.at<int>(i, cv::CC_STAT_WIDTH);
+        int h = stats.at<int>(i, cv::CC_STAT_HEIGHT);
+        cv::Rect bbox(x, y, w, h);                      // the enclosing box
+
+        double cx = centroids.at<double>(i, 0);         // centroid x
+        double cy = centroids.at<double>(i, 1);         // centroid y
+
+        LOGI("blob %d: bbox=(%d,%d,%d,%d) area=%d centroid=(%.1f,%.1f)",
+             i, x, y, w, h, area, cx, cy);
+
+        cv::rectangle(dst, bbox, cv::Scalar(0, 255, 0, 255), 2);
+    }
+
     AndroidBitmap_unlockPixels(env, output);
     AndroidBitmap_unlockPixels(env, input);
-
-
 }
