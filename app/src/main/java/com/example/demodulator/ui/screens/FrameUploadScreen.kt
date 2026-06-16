@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -40,6 +41,14 @@ fun FrameUploadScreen(
     // State that survives recompositions
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     var decodedBits by remember { mutableStateOf<String?>(null) }
+    var otsuResult by remember { mutableStateOf<Bitmap?>(null) }
+
+    fun runThreshold(src: Bitmap?): Bitmap? {
+        if (src == null) return null;
+        val dst = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        OpenCVUtils.otsuThreshold(src, dst)
+        return dst
+    }
 
     // File picker launcher
     val launcher = rememberLauncherForActivityResult(
@@ -48,8 +57,11 @@ fun FrameUploadScreen(
         if (uri != null) {
             bitmap = FrameLoader.loadOrientedBitmap(context, uri)
             decodedBits = null // Reset previous result in case new img picked
+            otsuResult = runThreshold(bitmap);
         }
     }
+
+
 
     fun processImage(myNullableBitmap: Bitmap?): String {
         // 1. Check and abort if null
@@ -88,8 +100,9 @@ fun FrameUploadScreen(
                 onClick = { launcher.launch("image/*") },
             )
         } else {
-            ImageWithLedOverlay(bitmap = currentBitmap)
+//            ImageWithLedOverlay(bitmap = currentBitmap)
 
+            otsuResult?.let { bmp -> Image(bitmap = bmp.asImageBitmap(), contentDescription = "Otsu result") }
             Spacer(modifier = Modifier.height(16.dp))
 
             CyberButton(
