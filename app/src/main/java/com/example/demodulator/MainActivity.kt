@@ -27,8 +27,6 @@ import com.example.demodulator.ui.screens.FrameUploadScreen
 
 enum class Screen { Main, FrameUpload }
 class MainActivity : ComponentActivity() {
-    external fun stringFromCpp(name: String): String
-
     companion object {
         init {
             System.loadLibrary("demodulator")

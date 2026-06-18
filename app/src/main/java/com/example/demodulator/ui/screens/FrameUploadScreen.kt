@@ -4,6 +4,7 @@ package com.example.demodulator.ui.screens
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -30,6 +31,8 @@ import com.example.demodulator.decoder.FrameDecoder
 import com.example.demodulator.decoder.FrameLoader
 import com.example.demodulator.ui.components.CyberButton
 import com.example.demodulator.ui.theme.NeonRed
+import androidx.core.graphics.createBitmap
+import com.example.demodulator.LED
 
 @Composable
 fun FrameUploadScreen(
@@ -37,16 +40,26 @@ fun FrameUploadScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val DEBUG_TAG = "RECT"
 
     // State that survives recompositions
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     var decodedBits by remember { mutableStateOf<String?>(null) }
     var otsuResult by remember { mutableStateOf<Bitmap?>(null) }
 
+    fun logRegions(regions: Array<LED>) {
+        Log.d(DEBUG_TAG, "Received ${regions.size} regions")
+        regions.forEachIndexed { i, led ->
+            if (led == null) Log.e(DEBUG_TAG, "Element $i is NULL")
+            else Log.d(DEBUG_TAG, "[$i] ${led.x},${led.y},${led.width},${led.height}")
+        }
+
+    }
     fun runThreshold(src: Bitmap?): Bitmap? {
         if (src == null) return null;
-        val dst = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
-        OpenCVUtils.otsuThreshold(src, dst)
+        val dst = createBitmap(src.width, src.height)
+        val ledBounds: Array<LED> = OpenCVUtils.otsuThreshold(src, dst)
+        logRegions(ledBounds)
         return dst
     }
 
@@ -61,20 +74,6 @@ fun FrameUploadScreen(
         }
     }
 
-
-
-    fun processImage(myNullableBitmap: Bitmap?): String {
-        // 1. Check and abort if null
-        if (myNullableBitmap == null) {
-            println("Error: No image selected!")
-            return ""
-        }
-
-        // 2. Kotlin "Smart Casts" myNullableBitmap to non-null here
-        val info = OpenCVUtils.getBitmapInfo(myNullableBitmap)
-        return info
-    }
-
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -82,7 +81,6 @@ fun FrameUploadScreen(
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(text = processImage(bitmap))
         Text(
             text = "FRAME UPLOAD",
             color = NeonRed,
