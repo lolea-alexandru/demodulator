@@ -41,13 +41,17 @@ fun FrameUploadScreen(
 ) {
     val context = LocalContext.current
     val DEBUG_TAG = "RECT"
+    val OTSU_TAG = "OTSU"
 
     // State that survives recompositions
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     var decodedBits by remember { mutableStateOf<String?>(null) }
     var otsuResult by remember { mutableStateOf<Bitmap?>(null) }
+    var ledArray by remember { mutableStateOf<Array<LED>?>(null) }
+    var otsuThresholdsArray by remember { mutableStateOf<Array<Double>?>(null) }
 
-    fun logRegions(regions: Array<LED>) {
+    fun logRegions(regions: Array<LED>?) {
+        if(regions == null) return;
         Log.d(DEBUG_TAG, "Received ${regions.size} regions")
         regions.forEachIndexed { i, led ->
             if (led == null) Log.e(DEBUG_TAG, "Element $i is NULL")
@@ -58,9 +62,29 @@ fun FrameUploadScreen(
     fun runThreshold(src: Bitmap?): Bitmap? {
         if (src == null) return null;
         val dst = createBitmap(src.width, src.height)
-        val ledBounds: Array<LED> = OpenCVUtils.otsuThreshold(src, dst)
-        logRegions(ledBounds)
+        ledArray = OpenCVUtils.findLEDBounds(src, dst)
+        logRegions(ledArray)
         return dst
+    }
+
+    fun decode() {
+        Log.d(OTSU_TAG, "ENTERED")
+        // Make sure the delegated variables are constant throughout execution (kinda grim ngl)
+        val localLEDArr = ledArray ?: return;
+        val localBitmap = bitmap ?: return;
+        val localOtsuThresholdsArray = otsuThresholdsArray ?: return;
+
+        // Get the Otsu thresholds for each of the LED regions
+        localLEDArr.forEachIndexed { i, led ->
+            val currentLEDThreshold = OpenCVUtils.otsuThreshold(localBitmap, led);
+            localOtsuThresholdsArray.set(i, currentLEDThreshold);
+            Log.d(OTSU_TAG, "Bound for $i: $currentLEDThreshold")
+        }
+
+        // Pass each of the LED regions through
+        otsuThresholdsArray = localOtsuThresholdsArray;
+
+
     }
 
     // File picker launcher
@@ -98,17 +122,13 @@ fun FrameUploadScreen(
                 onClick = { launcher.launch("image/*") },
             )
         } else {
-//            ImageWithLedOverlay(bitmap = currentBitmap)
-
             otsuResult?.let { bmp -> Image(bitmap = bmp.asImageBitmap(), contentDescription = "Otsu result") }
             Spacer(modifier = Modifier.height(16.dp))
 
             CyberButton(
                 text = "DECODE",
                 onClick = {
-                    val profile = BrightnessProfile.compute(currentBitmap)
-                    val decoder = FrameDecoder(profile)
-                    decodedBits = decoder.decode()
+                    decode()
                 },
             )
 
@@ -155,48 +175,3 @@ private fun DecodedBitsDisplay(bits: String) {
     }
 }
 
-
-@Composable
-private fun ImageWithLedOverlay(bitmap: Bitmap) {
-    val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
-
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center,
-    ) {
-        // Calculate the displayed size, preserving aspect ratio
-        val availableWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) {
-            maxWidth.toPx()
-        }
-        val scale = availableWidthPx / bitmap.width
-        val displayWidthPx = bitmap.width * scale
-        val displayHeightPx = bitmap.height * scale
-
-        val ledLeftPx   = DecoderConfig.LED_LEFT   * scale
-        val ledTopPx    = DecoderConfig.LED_TOP    * scale
-        val ledRightPx  = DecoderConfig.LED_RIGHT  * scale
-        val ledBottomPx = DecoderConfig.LED_BOTTOM * scale
-
-        Canvas(
-            modifier = Modifier
-                .width(maxWidth)
-                .height(with(androidx.compose.ui.platform.LocalDensity.current) {
-                    displayHeightPx.toDp()
-                })
-        ) {
-            drawImage(imageBitmap, dstSize = androidx.compose.ui.unit.IntSize(
-                displayWidthPx.toInt(),
-                displayHeightPx.toInt()
-            ))
-            drawRect(
-                color = Color.White,
-                topLeft = androidx.compose.ui.geometry.Offset(ledLeftPx, ledTopPx),
-                size = androidx.compose.ui.geometry.Size(
-                    ledRightPx - ledLeftPx,
-                    ledBottomPx - ledTopPx
-                ),
-                style = Stroke(width = 4f)
-            )
-        }
-    }
-}

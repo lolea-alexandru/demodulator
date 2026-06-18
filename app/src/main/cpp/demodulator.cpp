@@ -12,7 +12,7 @@
 
 // Otsu thresholding
 extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_example_demodulator_OpenCVUtils_otsuThreshold(
+Java_com_example_demodulator_OpenCVUtils_findLEDBounds(
         JNIEnv* env, jobject /* this */,
         jobject input, jobject output) {
 
@@ -116,4 +116,41 @@ Java_com_example_demodulator_OpenCVUtils_otsuThreshold(
     AndroidBitmap_unlockPixels(env, input);
 
     return ledBounds;
+}
+
+extern "C"
+JNIEXPORT jdouble JNICALL
+Java_com_example_demodulator_OpenCVUtils_otsuThreshold(JNIEnv *env, jobject thiz, jobject ogBitmap,
+                                                       jobject led) {
+    // --- read the LED's bounding box ---
+    jclass cls = env->GetObjectClass(led);   // class from the instance, no hardcoded name
+    cv::Rect box(
+            env->GetIntField(led, env->GetFieldID(cls, "x", "I")),
+            env->GetIntField(led, env->GetFieldID(cls, "y", "I")),
+            env->GetIntField(led, env->GetFieldID(cls, "width", "I")),
+            env->GetIntField(led, env->GetFieldID(cls, "height", "I")));
+
+    // --- inspect the bitmap ---
+    AndroidBitmapInfo info;
+    if (AndroidBitmap_getInfo(env, ogBitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS ||
+        info.format != ANDROID_BITMAP_FORMAT_RGBA_8888)
+        return -1.0;                          // sentinel: Otsu is always in [0,255]
+
+    box &= cv::Rect(0, 0, info.width, info.height);  // clamp before cropping
+    if (box.area() == 0) return -1.0;
+
+    // --- lock, convert only the ROI, unlock ---
+    void* pixels = nullptr;
+    if (AndroidBitmap_lockPixels(env, ogBitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS)
+        return -1.0;
+
+    cv::Mat rgba(info.height, info.width, CV_8UC4, pixels, info.stride);  // wraps, no copy
+    cv::Mat grayRoi;
+    cv::cvtColor(rgba(box), grayRoi, cv::COLOR_RGBA2GRAY);    // converts just the region
+    AndroidBitmap_unlockPixels(env, ogBitmap);               // grayRoi owns its data now
+
+    // --- Otsu ---
+    cv::Mat binary;
+    return cv::threshold(grayRoi, binary, 0, 255,
+                         cv::THRESH_BINARY | cv::THRESH_OTSU);  // returns the threshold
 }
