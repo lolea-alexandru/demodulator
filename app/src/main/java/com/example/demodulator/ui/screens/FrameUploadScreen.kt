@@ -42,6 +42,7 @@ fun FrameUploadScreen(
     val context = LocalContext.current
     val DEBUG_TAG = "RECT"
     val OTSU_TAG = "OTSU"
+    val INFO_TAG = "INFO"
 
     // State that survives recompositions
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -63,7 +64,10 @@ fun FrameUploadScreen(
         if (src == null) return null;
         val dst = createBitmap(src.width, src.height)
         ledArray = OpenCVUtils.findLEDBounds(src, dst)
-        logRegions(ledArray)
+        val currentLEDArray = ledArray ?: return null;
+        val averageColumnGap = OpenCVUtils.findColumnGap(currentLEDArray)
+
+        Log.e(INFO_TAG, "The avg gap is: $averageColumnGap")
         return dst
     }
 
@@ -76,7 +80,7 @@ fun FrameUploadScreen(
 
         // Get the Otsu thresholds for each of the LED regions
         localLEDArr.forEachIndexed { i, led ->
-            val currentLEDThreshold = OpenCVUtils.otsuThreshold(localBitmap, led);
+            val currentLEDThreshold = OpenCVUtils.otsuThreshold(localBitmap, led)
             localOtsuThresholdsArray.set(i, currentLEDThreshold);
             Log.d(OTSU_TAG, "Bound for $i: $currentLEDThreshold")
         }
