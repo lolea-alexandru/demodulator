@@ -43,6 +43,15 @@ int averageLedGap(std::vector<cv::Rect> leds) {
     return static_cast<int>(std::ceil(avg));
 }
 
+// --- pure C++ computation: widest horizontal span of x ------------------
+int maxXSpan(const std::vector<cv::Rect>& leds) {
+    if (leds.empty()) return 0;
+    auto [lo, hi] = std::minmax_element(
+            leds.begin(), leds.end(),
+            [](const cv::Rect& a, const cv::Rect& b) { return a.x < b.x; });
+    return hi->x - lo->x;            // max x - min x
+}
+
 // Otsu thresholding
 extern "C" JNIEXPORT jobjectArray JNICALL
 Java_com_example_demodulator_OpenCVUtils_findLEDBounds(
@@ -254,4 +263,30 @@ Java_com_example_demodulator_OpenCVUtils_findColumnGap(JNIEnv *env, jobject thiz
     env->DeleteLocalRef(ledCls);
 
     return static_cast<jint>(averageLedGap(std::move(rects)));
+}
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_example_demodulator_OpenCVUtils_findMaxSpan(JNIEnv *env, jobject thiz, jobjectArray leds) {
+    const jsize n = env->GetArrayLength(leds);
+
+    jclass ledCls = env->FindClass("com/example/demodulator/LED");
+    jfieldID fX = env->GetFieldID(ledCls, "x", "I");
+    jfieldID fY = env->GetFieldID(ledCls, "y", "I");
+    jfieldID fW = env->GetFieldID(ledCls, "width", "I");
+    jfieldID fH = env->GetFieldID(ledCls, "height", "I");
+
+    std::vector<cv::Rect> rects;
+    rects.reserve(n);
+    for (jsize i = 0; i < n; ++i) {
+        jobject led = env->GetObjectArrayElement(leds, i);
+        const jint x = env->GetIntField(led, fX);
+        const jint y = env->GetIntField(led, fY);
+        const jint w = env->GetIntField(led, fW);
+        const jint h = env->GetIntField(led, fH);
+        rects.emplace_back(x, y, w, h);
+        env->DeleteLocalRef(led);
+    }
+    env->DeleteLocalRef(ledCls);
+
+    return static_cast<jint>(maxXSpan(rects));   // pure C++ compute
 }

@@ -66,8 +66,8 @@ fun FrameUploadScreen(
         ledArray = OpenCVUtils.findLEDBounds(src, dst)
         val currentLEDArray = ledArray ?: return null;
         val averageColumnGap = OpenCVUtils.findColumnGap(currentLEDArray)
-
-        Log.e(INFO_TAG, "The avg gap is: $averageColumnGap")
+        val maxSpan = OpenCVUtils.findMaxSpan(currentLEDArray);
+        Log.e(INFO_TAG, "The avg gap is $averageColumnGap and the max span is $maxSpan")
         return dst
     }
 
