@@ -1,13 +1,11 @@
 package com.example.demodulator.ui.screens
 
 
-import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -18,21 +16,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.demodulator.OpenCVUtils
-import com.example.demodulator.decoder.BrightnessProfile
-import com.example.demodulator.decoder.DecoderConfig
-import com.example.demodulator.decoder.FrameDecoder
 import com.example.demodulator.decoder.FrameLoader
 import com.example.demodulator.ui.components.CyberButton
 import com.example.demodulator.ui.theme.NeonRed
 import androidx.core.graphics.createBitmap
 import com.example.demodulator.LED
+import androidx.compose.ui.graphics.Canvas
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.PaintingStyle
+
+
 
 @Composable
 fun FrameUploadScreen(
@@ -51,15 +51,7 @@ fun FrameUploadScreen(
     var ledArray by remember { mutableStateOf<Array<LED>?>(null) }
     var otsuThresholdsArray by remember { mutableStateOf<Array<Double>?>(null) }
 
-    fun logRegions(regions: Array<LED>?) {
-        if(regions == null) return;
-        Log.d(DEBUG_TAG, "Received ${regions.size} regions")
-        regions.forEachIndexed { i, led ->
-            if (led == null) Log.e(DEBUG_TAG, "Element $i is NULL")
-            else Log.d(DEBUG_TAG, "[$i] ${led.x},${led.y},${led.width},${led.height}")
-        }
 
-    }
     fun runThreshold(src: Bitmap?): Bitmap? {
         if (src == null) return null;
         val dst = createBitmap(src.width, src.height)
@@ -72,33 +64,43 @@ fun FrameUploadScreen(
     }
 
     fun decode() {
-        Log.d(OTSU_TAG, "ENTERED")
         // Make sure the delegated variables are constant throughout execution (kinda grim ngl)
         val localLEDArr = ledArray ?: return;
         val localBitmap = bitmap ?: return;
-        val localOtsuThresholdsArray = otsuThresholdsArray ?: return;
+//        val localOtsuThresholdsArray = otsuThresholdsArray ?: return;
+        val localOtsuThresholdsArray: Array<Double> = Array(24) { 0.0 }
 
         // Get the Otsu thresholds for each of the LED regions
-        localLEDArr.forEachIndexed { i, led ->
-            val currentLEDThreshold = OpenCVUtils.otsuThreshold(localBitmap, led)
-            localOtsuThresholdsArray.set(i, currentLEDThreshold);
-            Log.d(OTSU_TAG, "Bound for $i: $currentLEDThreshold")
+        // TODO: change the hardocded "7" to a calculated result
+        val decodedResult = OpenCVUtils.demodulateBoardColMajor(localBitmap, localLEDArr, 16)
+
+        for(decodedString in decodedResult) {
+            Log.d("DECODED", decodedString);
         }
-
-        // Pass each of the LED regions through
-        otsuThresholdsArray = localOtsuThresholdsArray;
-
-
     }
 
     // File picker launcher
-    val launcher = rememberLauncherForActivityResult(
+    val refImgLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
             bitmap = FrameLoader.loadOrientedBitmap(context, uri)
             decodedBits = null // Reset previous result in case new img picked
             otsuResult = runThreshold(bitmap);
+            bitmap = otsuResult
+        }
+    }
+
+    val demodLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            // Get the current bitmap
+            bitmap = FrameLoader.loadOrientedBitmap(context, uri)
+
+            val localBitmap = bitmap ?: return@rememberLauncherForActivityResult
+            val localLedArray = ledArray ?: return@rememberLauncherForActivityResult
+            OpenCVUtils.drawLEDBounds(localBitmap, localLedArray)
         }
     }
 
@@ -122,12 +124,17 @@ fun FrameUploadScreen(
         val currentBitmap = bitmap // created for smart-casting
         if (currentBitmap == null) {
             CyberButton(
-                text = "PICK IMAGE",
-                onClick = { launcher.launch("image/*") },
+                text = "PICK REFERENCE IMAGE",
+                onClick = { refImgLauncher.launch("image/*") },
             )
         } else {
-            otsuResult?.let { bmp -> Image(bitmap = bmp.asImageBitmap(), contentDescription = "Otsu result") }
+            bitmap?.let { bmp -> Image(bitmap = bmp.asImageBitmap(), contentDescription = "Otsu result") }
             Spacer(modifier = Modifier.height(16.dp))
+
+            CyberButton(
+                text = "PICK DEMOD IMAGE",
+                onClick = { demodLauncher.launch("image/*") },
+            )
 
             CyberButton(
                 text = "DECODE",
@@ -138,7 +145,7 @@ fun FrameUploadScreen(
 
             CyberButton(
                 text = "PICK DIFFERENT IMAGE",
-                onClick = { launcher.launch("image/*") },
+                onClick = { demodLauncher.launch("image/*") },
             )
 
             // --- Decoded result display ---

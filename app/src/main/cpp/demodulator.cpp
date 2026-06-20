@@ -49,7 +49,7 @@ int maxXSpan(const std::vector<cv::Rect>& leds) {
     auto [lo, hi] = std::minmax_element(
             leds.begin(), leds.end(),
             [](const cv::Rect& a, const cv::Rect& b) { return a.x < b.x; });
-    return hi->x - lo->x;            // max x - min x
+    return (hi->x + hi->width) - lo->x;            // max x - min x
 }
 
 // Otsu thresholding
@@ -226,12 +226,7 @@ Java_com_example_demodulator_OpenCVUtils_otsuThreshold(JNIEnv *env, jobject thiz
     return cv::threshold(grayRoi, binary, 0, 255,
                          cv::THRESH_BINARY | cv::THRESH_OTSU);  // returns the threshold
 }
-extern "C"
-JNIEXPORT jstring JNICALL
-Java_com_example_demodulator_OpenCVUtils_demodulate(JNIEnv *env, jobject thiz, jobject og_bitmap,
-                                                    jobject led, jdouble otsu_threshold) {
-    // TODO: implement demodulate()
-}
+
 extern "C"
 JNIEXPORT jint JNICALL
 Java_com_example_demodulator_OpenCVUtils_findColumnGap(JNIEnv *env, jobject thiz,
@@ -289,4 +284,187 @@ Java_com_example_demodulator_OpenCVUtils_findMaxSpan(JNIEnv *env, jobject thiz, 
     env->DeleteLocalRef(ledCls);
 
     return static_cast<jint>(maxXSpan(rects));   // pure C++ compute
+}
+
+void sortLedsColumnMajor(std::vector<cv::Rect>& leds) {
+    constexpr int ROWS = 6;                          // LEDs per column (chunk size)
+
+    // 1. by x: columns group together, leftmost first
+    std::sort(leds.begin(), leds.end(),
+              [](const cv::Rect& a, const cv::Rect& b) { return a.x < b.x; });
+
+    // 2. within each chunk of ROWS (one column): top-to-bottom by y
+    for (size_t start = 0; start < leds.size(); start += ROWS) {
+        auto end = leds.begin() + std::min(start + ROWS, leds.size());
+        std::sort(leds.begin() + start, end,
+                  [](const cv::Rect& a, const cv::Rect& b) { return a.y < b.y; });
+    }
+}
+
+
+
+std::string demodulate(const cv::Mat& gray, const cv::Rect& led,
+                       double otsuThreshold, int columnsPerSymbol) {
+    CV_Assert(columnsPerSymbol > 0);
+
+    // Step 1: take the LED region (clamped to the image; this is a view).
+    cv::Rect bounds = led & cv::Rect(0, 0, gray.cols, gray.rows);
+    cv::Mat roi = gray(bounds);
+
+    // Step 2: walk every column right -> left (temporal order of the scan) and
+    // mark it ON/OFF by comparing the column mean to the Otsu threshold.
+    std::vector<bool> columnOn;
+    columnOn.reserve(roi.cols);
+    for (int c = roi.cols - 1; c >= 0; --c) {
+        double colMean = cv::mean(roi.col(c))[0];
+        LOGI("COL_MEAN %d: %.1f , %.1f\n", c , colMean, otsuThreshold);
+
+        columnOn.push_back(colMean > otsuThreshold);
+    }
+    LOGI("=================================== END OF MODULATED LED ===================================");
+
+
+    // Step 3: group columns into symbols of `columnsPerSymbol`, majority-vote
+    // each group (ON if at least half its columns are ON), append '1'/'0'.
+    int guard = columnsPerSymbol / 4;
+    std::string bits;
+    bits.reserve(columnOn.size() / columnsPerSymbol);
+    for (int start = 0;
+         start + columnsPerSymbol <= static_cast<int>(columnOn.size());
+         start += columnsPerSymbol) {
+        int onCount = 0;
+        for (int k = guard; k < columnsPerSymbol - guard; ++k)
+            if (columnOn[start + k]) ++onCount;
+        bool symbolOn = (2 * onCount >= columnsPerSymbol);   // at least half ON
+        bits += symbolOn ? '1' : '0';
+    }
+
+    // Step 4: return the decoded bit string (first char = rightmost symbol).
+    return bits;
+}
+
+std::vector<std::string> decodeBoard(const cv::Mat& bitmap,
+                                     std::vector<cv::Rect> leds,
+                                     int columnsPerSymbol) {
+    sortLedsColumnMajor(leds);
+
+    cv::Mat gray;
+    cv::cvtColor(bitmap, gray, cv::COLOR_RGBA2GRAY);   // for the per-region Otsu
+
+    std::vector<std::string> out;
+    out.reserve(leds.size());
+    for (const cv::Rect& led : leds) {
+        cv::Rect b = led & cv::Rect(0, 0, gray.cols, gray.rows);
+        cv::Mat binarized;
+        double otsu = cv::threshold(gray(b), binarized, 0, 255,
+                                    cv::THRESH_BINARY | cv::THRESH_OTSU);  // per-LED threshold
+
+        LOGI("=================================== START DEMODULATION LED ===================================");
+        LOGI("COORDS: X=%d, Y=%d", led.x, led.y);
+
+        out.push_back(demodulate(gray, led, otsu, columnsPerSymbol));
+    }
+    return out;
+}
+
+extern "C"
+JNIEXPORT jobjectArray JNICALL
+Java_com_example_demodulator_OpenCVUtils_demodulateBoardColMajor(JNIEnv *env, jobject thiz, jobject bitmap,
+                                                    jobjectArray ledArray, jint columnsPerSymbol) {
+    // --- wrap the Android bitmap as a cv::Mat (no copy) ---
+    AndroidBitmapInfo info;
+    if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS)
+        return nullptr;
+    CV_Assert(info.format == ANDROID_BITMAP_FORMAT_RGBA_8888);   // CV_8UC4 / RGBA
+
+    void* pixels = nullptr;
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS)
+        return nullptr;
+
+    // pass info.stride as the Mat step: bitmap rows may be padded
+    cv::Mat mat(info.height, info.width, CV_8UC4, pixels, info.stride);
+
+    // --- convert the LED object to a cv::Rect ---
+    jsize ledCount = env->GetArrayLength(ledArray);
+    LOGI("LED_COUNT: %d", ledCount);
+    jclass ledCls = env->FindClass("com/example/demodulator/LED");
+    jfieldID fX = env->GetFieldID(ledCls, "x", "I");
+    jfieldID fY = env->GetFieldID(ledCls, "y", "I");
+    jfieldID fW = env->GetFieldID(ledCls, "width", "I");
+    jfieldID fH = env->GetFieldID(ledCls, "height", "I");
+    std::vector<cv::Rect> leds;
+    leds.reserve(ledCount);
+    for (jsize i = 0; i < ledCount; ++i) {
+        jobject ledObj = env->GetObjectArrayElement(ledArray, i);
+        leds.emplace_back(env->GetIntField(ledObj, fX),
+                          env->GetIntField(ledObj, fY),
+                          env->GetIntField(ledObj, fW),
+                          env->GetIntField(ledObj, fH));
+        env->DeleteLocalRef(ledObj);
+    }
+    env->DeleteLocalRef(ledCls);
+
+    // --- run the pure C++ demodulator, then release the bitmap ---
+    std::vector<std::string> decoded_board = decodeBoard(mat, leds, columnsPerSymbol);
+    AndroidBitmap_unlockPixels(env, bitmap);   // demodulate copied into its own gray Mat
+
+    // --- std::vector<std::string> -> Kotlin Array<String> ---
+    jclass strCls = env->FindClass("java/lang/String");
+    jobjectArray result =
+            env->NewObjectArray(static_cast<jsize>(decoded_board.size()), strCls, nullptr);
+    for (jsize i = 0; i < static_cast<jsize>(decoded_board.size()); ++i) {
+        jstring s = env->NewStringUTF(decoded_board[i].c_str());
+        env->SetObjectArrayElement(result, i, s);   // array takes its own ref
+        env->DeleteLocalRef(s);                      // drop ours so they don't pile up
+    }
+    env->DeleteLocalRef(strCls);
+
+    return result;
+}
+
+// Draws each LED's box onto the image in place.
+void drawLedBounds(cv::Mat& image, const std::vector<cv::Rect>& leds) {
+    const cv::Scalar color(0, 255, 0, 255);   // RGBA: opaque green
+    const int thickness = 2;
+    for (const cv::Rect& led : leds)
+        cv::rectangle(image, led, color, thickness);   // OpenCV clips boxes at the edges
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_example_demodulator_OpenCVUtils_drawLEDBounds(JNIEnv *env, jobject thiz,
+                                                       jobject bitmap, jobjectArray ledArray) {
+    // --- wrap the Android bitmap as a cv::Mat (no copy; writes land in the bitmap) ---
+    AndroidBitmapInfo info;
+    if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS)
+        return;
+    CV_Assert(info.format == ANDROID_BITMAP_FORMAT_RGBA_8888);   // CV_8UC4 / RGBA
+    void* pixels = nullptr;
+    if (AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS)
+        return;
+    cv::Mat mat(info.height, info.width, CV_8UC4, pixels, info.stride);
+
+    // --- convert the LED array to a std::vector<cv::Rect> ---
+    jsize ledCount = env->GetArrayLength(ledArray);
+    jclass ledCls = env->FindClass("com/example/demodulator/LED");
+    jfieldID fX = env->GetFieldID(ledCls, "x", "I");
+    jfieldID fY = env->GetFieldID(ledCls, "y", "I");
+    jfieldID fW = env->GetFieldID(ledCls, "width", "I");
+    jfieldID fH = env->GetFieldID(ledCls, "height", "I");
+
+    // Create the leds array
+    std::vector<cv::Rect> leds;
+    leds.reserve(ledCount);
+    for (jsize i = 0; i < ledCount; ++i) {
+        jobject ledObj = env->GetObjectArrayElement(ledArray, i);
+        leds.emplace_back(env->GetIntField(ledObj, fX),
+                          env->GetIntField(ledObj, fY),
+                          env->GetIntField(ledObj, fW),
+                          env->GetIntField(ledObj, fH));
+        env->DeleteLocalRef(ledObj);
+    }
+    env->DeleteLocalRef(ledCls);
+
+    // --- draw in place, then release the bitmap (writes commit on unlock) ---
+    drawLedBounds(mat, leds);
+    AndroidBitmap_unlockPixels(env, bitmap);
 }
