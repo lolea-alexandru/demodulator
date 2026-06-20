@@ -191,43 +191,6 @@ Java_com_example_demodulator_OpenCVUtils_findLEDBounds(
 }
 
 extern "C"
-JNIEXPORT jdouble JNICALL
-Java_com_example_demodulator_OpenCVUtils_otsuThreshold(JNIEnv *env, jobject thiz, jobject ogBitmap,
-                                                       jobject led) {
-    // --- read the LED's bounding box ---
-    jclass cls = env->GetObjectClass(led);   // class from the instance, no hardcoded name
-    cv::Rect box(
-            env->GetIntField(led, env->GetFieldID(cls, "x", "I")),
-            env->GetIntField(led, env->GetFieldID(cls, "y", "I")),
-            env->GetIntField(led, env->GetFieldID(cls, "width", "I")),
-            env->GetIntField(led, env->GetFieldID(cls, "height", "I")));
-
-    // --- inspect the bitmap ---
-    AndroidBitmapInfo info;
-    if (AndroidBitmap_getInfo(env, ogBitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS ||
-        info.format != ANDROID_BITMAP_FORMAT_RGBA_8888)
-        return -1.0;                          // sentinel: Otsu is always in [0,255]
-
-    box &= cv::Rect(0, 0, info.width, info.height);  // clamp before cropping
-    if (box.area() == 0) return -1.0;
-
-    // --- lock, convert only the ROI, unlock ---
-    void* pixels = nullptr;
-    if (AndroidBitmap_lockPixels(env, ogBitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS)
-        return -1.0;
-
-    cv::Mat rgba(info.height, info.width, CV_8UC4, pixels, info.stride);  // wraps, no copy
-    cv::Mat grayRoi;
-    cv::cvtColor(rgba(box), grayRoi, cv::COLOR_RGBA2GRAY);    // converts just the region
-    AndroidBitmap_unlockPixels(env, ogBitmap);               // grayRoi owns its data now
-
-    // --- Otsu ---
-    cv::Mat binary;
-    return cv::threshold(grayRoi, binary, 0, 255,
-                         cv::THRESH_BINARY | cv::THRESH_OTSU);  // returns the threshold
-}
-
-extern "C"
 JNIEXPORT jint JNICALL
 Java_com_example_demodulator_OpenCVUtils_findColumnGap(JNIEnv *env, jobject thiz,
                                                        jobjectArray leds) {
@@ -319,7 +282,7 @@ std::string demodulate(const cv::Mat& gray, const cv::Rect& led,
         double colMean = cv::mean(roi.col(c))[0];
         LOGI("COL_MEAN %d: %.1f , %.1f\n", c , colMean, otsuThreshold);
 
-        columnOn.push_back(colMean > otsuThreshold);
+        columnOn.push_back(colMean > std::max(otsuThreshold, 10.0));
     }
     LOGI("=================================== END OF MODULATED LED ===================================");
 
@@ -343,10 +306,66 @@ std::string demodulate(const cv::Mat& gray, const cv::Rect& led,
     return bits;
 }
 
+std::string demodulate_sliding_window(const cv::Mat& gray, const cv::Rect& led,
+                                      double t, int columnsPerSymbol) {
+    CV_Assert(columnsPerSymbol > 0);
+
+    // Step 1: take the LED region (clamped; a view into gray).
+    cv::Rect bounds = led & cv::Rect(0, 0, gray.cols, gray.rows);
+    cv::Mat roi = gray(bounds);
+    const int n = roi.cols;
+
+    // Step 2: per-column mean, right -> left (index 0 = rightmost = earliest in time).
+    std::vector<double> colMeans;
+    colMeans.reserve(n);
+    for (int c = n - 1; c >= 0; --c)
+        colMeans.push_back(cv::mean(roi.col(c))[0]);
+
+    // Step 3: prefix sums over the column means (the 1-D integral image) for O(1) windows.
+    std::vector<double> prefix(n + 1, 0.0);
+    for (int i = 0; i < n; ++i)
+        prefix[i + 1] = prefix[i] + colMeans[i];
+
+    // Step 4: decide each column against its local window mean, bumped up by t%.
+    const int W = 4 * columnsPerSymbol;          // window spans several symbols
+    const double factor = 1.0 + t / 100.0;
+    std::vector<bool> columnOn(n);
+    for (int c = 0; c < n; ++c) {
+        int lo = std::max(0, c - W / 2);
+        int hi = std::min(n, c + W / 2 + 1);     // exclusive; clamps the borders
+        double localMean = (prefix[hi] - prefix[lo]) / (hi - lo);
+        columnOn[c] = colMeans[c] > localMean * factor;   // ON if clearly above neighbourhood
+    }
+
+    // Step 5: guard-trimmed majority vote per symbol (unchanged).
+    const int guard = columnsPerSymbol / 4;
+    std::string bits;
+    bits.reserve(n / columnsPerSymbol);
+    for (int start = 0; start + columnsPerSymbol <= n; start += columnsPerSymbol) {
+        int onCount = 0, total = 0;
+        for (int k = guard; k < columnsPerSymbol - guard; ++k) {
+            if (columnOn[start + k]) ++onCount;
+            ++total;
+        }
+        bits += (2 * onCount >= total) ? '1' : '0';
+    }
+
+    // Step 6: return (first char = rightmost symbol).
+    return bits;
+}
+
 std::vector<std::string> decodeBoard(const cv::Mat& bitmap,
                                      std::vector<cv::Rect> leds,
                                      int columnsPerSymbol) {
     sortLedsColumnMajor(leds);
+
+//    DEBUG LOOP
+//    std::vector<cv::Mat> ch;
+//    cv::split(bitmap, ch);                 // ch[0..3]
+//    for (int i = 0; i < ch.size(); ++i) {
+//        double lo, hi; cv::minMaxLoc(ch[i], &lo, &hi);
+//        LOGI("channel %d max = %.0f\n", i, hi);
+//    }
 
     cv::Mat gray;
     cv::cvtColor(bitmap, gray, cv::COLOR_RGBA2GRAY);   // for the per-region Otsu
@@ -360,9 +379,14 @@ std::vector<std::string> decodeBoard(const cv::Mat& bitmap,
                                     cv::THRESH_BINARY | cv::THRESH_OTSU);  // per-LED threshold
 
         LOGI("=================================== START DEMODULATION LED ===================================");
-        LOGI("COORDS: X=%d, Y=%d", led.x, led.y);
 
-        out.push_back(demodulate(gray, led, otsu, columnsPerSymbol));
+        double lo, hi;
+        cv::minMaxLoc(gray(b), &lo, &hi);
+        LOGI("MINMAX: min=%.1f, max=%.1f", lo, hi);
+
+        double t = 3.0;
+//        out.push_back(demodulate(gray, led, otsu, columnsPerSymbol));
+        out.push_back(demodulate_sliding_window(gray, led, t, columnsPerSymbol));
     }
     return out;
 }
