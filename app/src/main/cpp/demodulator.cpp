@@ -305,7 +305,7 @@ std::string demodulate(const cv::Mat& gray, const cv::Rect& led,
 
         columnOn.push_back(colMean > std::max(otsuThreshold, 10.0));
     }
-    LOGI("=================================== END OF MODULATED LED ===================================");
+//    LOGI("=================================== END OF MODULATED LED ===================================");
 
 
     // Step 3: group columns into symbols of `columnsPerSymbol`, majority-vote
@@ -393,7 +393,7 @@ std::vector<std::string> decodeBoard(const cv::Mat& bitmap,
         double otsu = cv::threshold(gray(b), binarized, 0, 255,
                                     cv::THRESH_BINARY | cv::THRESH_OTSU);  // per-LED threshold
 
-        LOGI("=================================== START DEMODULATION LED ===================================");
+//        LOGI("=================================== START DEMODULATION LED ===================================");
 
         double lo, hi;
         cv::minMaxLoc(gray(b), &lo, &hi);
@@ -403,7 +403,7 @@ std::vector<std::string> decodeBoard(const cv::Mat& bitmap,
         std::string decodeResult = demodulate(gray, led, otsu, columnsPerSymbol);
         int missed = minHammingDistance(decodeResult);
 
-        LOGI("RES: %s ---------- BER: %.1f", decodeResult.c_str(), static_cast<double>(missed)/decodeResult.size());
+//        LOGI("RES: %s ---------- BER: %.1f", decodeResult.c_str(), static_cast<double>(missed)/decodeResult.size());
 
         out.push_back(decodeResult);
 //        out.push_back(demodulate_sliding_window(gray, led, t, columnsPerSymbol));

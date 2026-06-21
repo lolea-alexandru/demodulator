@@ -24,8 +24,9 @@ import com.example.demodulator.ui.theme.NeonRed
 import com.example.demodulator.ui.theme.DemodulatorTheme
 import androidx.compose.runtime.*
 import com.example.demodulator.ui.screens.FrameUploadScreen
+import com.example.demodulator.ui.screens.VideoUploadScreen
 
-enum class Screen { Main, FrameUpload }
+enum class Screen { Main, FrameUpload, VideoUpload }
 class MainActivity : ComponentActivity() {
     companion object {
         init {
@@ -53,9 +54,14 @@ fun AppNavigation(modifier: Modifier = Modifier) {
     when (currentScreen) {
         Screen.Main -> MainScreen(
             onFrameUploadClick = { currentScreen = Screen.FrameUpload },
+            onVideoUploadClick = { currentScreen = Screen.VideoUpload },
             modifier = modifier,
         )
         Screen.FrameUpload -> FrameUploadScreen(
+            onBack = { currentScreen = Screen.Main },
+            modifier = modifier,
+        )
+        Screen.VideoUpload -> VideoUploadScreen(
             onBack = { currentScreen = Screen.Main },
             modifier = modifier,
         )
@@ -64,7 +70,11 @@ fun AppNavigation(modifier: Modifier = Modifier) {
 
 
 @Composable
-fun MainScreen(onFrameUploadClick: () -> Unit,modifier: Modifier = Modifier) {
+fun MainScreen(
+    onFrameUploadClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onVideoUploadClick: () -> Unit
+) {
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -96,7 +106,7 @@ fun MainScreen(onFrameUploadClick: () -> Unit,modifier: Modifier = Modifier) {
 
         CyberButton(
             text = "VIDEO UPLOAD",
-            onClick = { /* TODO */ },
+            onClick = onVideoUploadClick,
         )
     }
 }
