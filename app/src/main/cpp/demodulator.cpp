@@ -264,6 +264,26 @@ void sortLedsColumnMajor(std::vector<cv::Rect>& leds) {
     }
 }
 
+// Minimum Hamming distance between `decoded` and the cyclic `truth` period,
+// over all starting offsets 0 .. truth.size()-1.
+int minHammingDistance(const std::string& decoded, const std::string& truth) {
+    if (decoded.find_first_not_of('0') == std::string::npos)
+        return 0;
+
+    const int P = static_cast<int>(truth.size());
+    const int L = static_cast<int>(decoded.size());
+    if (P == 0) return L;            // no truth to compare against
+
+    int best = L;                    // worst case: every position mismatches
+    for (int k = 0; k < P; ++k) {    // try every cyclic offset into the truth
+        int dist = 0;
+        for (int i = 0; i < L; ++i)
+            if (decoded[i] != truth[(k + i) % P])   // % P wraps the period
+                ++dist;
+        best = std::min(best, dist);
+    }
+    return best;
+}
 
 
 std::string demodulate(const cv::Mat& gray, const cv::Rect& led,
@@ -280,7 +300,7 @@ std::string demodulate(const cv::Mat& gray, const cv::Rect& led,
     columnOn.reserve(roi.cols);
     for (int c = roi.cols - 1; c >= 0; --c) {
         double colMean = cv::mean(roi.col(c))[0];
-        LOGI("COL_MEAN %d: %.1f , %.1f\n", c , colMean, otsuThreshold);
+//        LOGI("COL_MEAN %d: %.1f , %.1f\n", c , colMean, otsuThreshold);
 
         columnOn.push_back(colMean > std::max(otsuThreshold, 10.0));
     }
@@ -289,7 +309,7 @@ std::string demodulate(const cv::Mat& gray, const cv::Rect& led,
 
     // Step 3: group columns into symbols of `columnsPerSymbol`, majority-vote
     // each group (ON if at least half its columns are ON), append '1'/'0'.
-    int guard = columnsPerSymbol / 4;
+    int guard = columnsPerSymbol / 8;
     std::string bits;
     bits.reserve(columnOn.size() / columnsPerSymbol);
     for (int start = 0;
@@ -302,9 +322,11 @@ std::string demodulate(const cv::Mat& gray, const cv::Rect& led,
         bits += symbolOn ? '1' : '0';
     }
 
+
     // Step 4: return the decoded bit string (first char = rightmost symbol).
     return bits;
 }
+
 
 std::string demodulate_sliding_window(const cv::Mat& gray, const cv::Rect& led,
                                       double t, int columnsPerSymbol) {
@@ -359,14 +381,6 @@ std::vector<std::string> decodeBoard(const cv::Mat& bitmap,
                                      int columnsPerSymbol) {
     sortLedsColumnMajor(leds);
 
-//    DEBUG LOOP
-//    std::vector<cv::Mat> ch;
-//    cv::split(bitmap, ch);                 // ch[0..3]
-//    for (int i = 0; i < ch.size(); ++i) {
-//        double lo, hi; cv::minMaxLoc(ch[i], &lo, &hi);
-//        LOGI("channel %d max = %.0f\n", i, hi);
-//    }
-
     cv::Mat gray;
     cv::cvtColor(bitmap, gray, cv::COLOR_RGBA2GRAY);   // for the per-region Otsu
 
@@ -382,11 +396,17 @@ std::vector<std::string> decodeBoard(const cv::Mat& bitmap,
 
         double lo, hi;
         cv::minMaxLoc(gray(b), &lo, &hi);
-        LOGI("MINMAX: min=%.1f, max=%.1f", lo, hi);
+//        LOGI("MINMAX: min=%.1f, max=%.1f", lo, hi);
 
         double t = 3.0;
-//        out.push_back(demodulate(gray, led, otsu, columnsPerSymbol));
-        out.push_back(demodulate_sliding_window(gray, led, t, columnsPerSymbol));
+        std::string decodeResult = demodulate(gray, led, otsu, columnsPerSymbol);
+        std::string truth = "1111111101101010011111111101101010011111111101101010101111111101101010101111111110011010";
+        int missed = minHammingDistance(decodeResult, truth);
+
+        LOGI("RES: %s ---------- BER: %.1f", decodeResult.c_str(), static_cast<double>(missed)/decodeResult.size());
+
+        out.push_back(decodeResult);
+//        out.push_back(demodulate_sliding_window(gray, led, t, columnsPerSymbol));
     }
     return out;
 }

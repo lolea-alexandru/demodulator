@@ -132,7 +132,7 @@ fun FrameUploadScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             CyberButton(
-                text = "PICK DEMOD IMAGE",
+                text = "PICK DEMODULATION IMAGE",
                 onClick = { demodLauncher.launch("image/*") },
             )
 
