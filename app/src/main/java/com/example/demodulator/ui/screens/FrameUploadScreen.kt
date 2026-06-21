@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.border
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -27,11 +28,7 @@ import com.example.demodulator.ui.components.CyberButton
 import com.example.demodulator.ui.theme.NeonRed
 import androidx.core.graphics.createBitmap
 import com.example.demodulator.LED
-import androidx.compose.ui.graphics.Canvas
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Paint
-import androidx.compose.ui.graphics.PaintingStyle
-
+import androidx.compose.ui.text.style.TextAlign
 
 
 @Composable
@@ -46,10 +43,10 @@ fun FrameUploadScreen(
 
     // State that survives recompositions
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var decodedBits by remember { mutableStateOf<String?>(null) }
     var otsuResult by remember { mutableStateOf<Bitmap?>(null) }
     var ledArray by remember { mutableStateOf<Array<LED>?>(null) }
-    var otsuThresholdsArray by remember { mutableStateOf<Array<Double>?>(null) }
+    var decodedBitArray by remember { mutableStateOf<Array<String>?>(null) }
+    var bitErrorRates by remember { mutableStateOf<Array<Double>?>(null) }
 
 
     fun runThreshold(src: Bitmap?): Bitmap? {
@@ -68,15 +65,18 @@ fun FrameUploadScreen(
         val localLEDArr = ledArray ?: return;
         val localBitmap = bitmap ?: return;
 //        val localOtsuThresholdsArray = otsuThresholdsArray ?: return;
-        val localOtsuThresholdsArray: Array<Double> = Array(24) { 0.0 }
-
+        val errorRates: Array<Double> = Array(24){0.0}
         // Get the Otsu thresholds for each of the LED regions
         // TODO: change the hardocded "7" to a calculated result
         val decodedResult = OpenCVUtils.demodulateBoardColMajor(localBitmap, localLEDArr, 16)
 
-        for(decodedString in decodedResult) {
-            Log.d("DECODED", decodedString);
+        decodedResult.forEachIndexed { i, decodedString ->
+            val errors = OpenCVUtils.minHammingDistance(decodedString)   // Int: error count
+            errorRates[i] = if (decodedString.isEmpty()) 0.0 else errors / decodedString.length        // -> BER
         }
+
+        bitErrorRates = errorRates
+        decodedBitArray = decodedResult
     }
 
     // File picker launcher
@@ -85,7 +85,6 @@ fun FrameUploadScreen(
     ) { uri: Uri? ->
         if (uri != null) {
             bitmap = FrameLoader.loadOrientedBitmap(context, uri)
-            decodedBits = null // Reset previous result in case new img picked
             otsuResult = runThreshold(bitmap);
             bitmap = otsuResult
         }
@@ -143,16 +142,12 @@ fun FrameUploadScreen(
                 },
             )
 
-            CyberButton(
-                text = "PICK DIFFERENT IMAGE",
-                onClick = { demodLauncher.launch("image/*") },
-            )
-
             // --- Decoded result display ---
-            val bits = decodedBits
-            if (bits != null) {
+            val bits = decodedBitArray
+            val errorRates = bitErrorRates
+            if (bits != null && errorRates != null) {
                 Spacer(modifier = Modifier.height(16.dp))
-                DecodedBitsDisplay(bits = bits)
+                DecodedGrid(bits, errorRates)
             }
         }
 
@@ -163,26 +158,48 @@ fun FrameUploadScreen(
                 onClick = onBack,
             )
         }
-}
 
+    }
 @Composable
-private fun DecodedBitsDisplay(bits: String) {
+fun DecodedGrid(decodedLEDs: Array<String>, errorRates: Array<Double>) {
+    val rows = 6
+    val cols = 4
     Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxWidth().padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text(
-            text = "DECODED (${bits.length} bits)",
-            color = NeonRed,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = bits,
-            color = NeonRed,
-            fontSize = 14.sp,
-            fontFamily = FontFamily.Monospace,
-        )
+        for (r in 0 until rows) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                for (c in 0 until cols) {
+                    val index = c * rows + r                 // column-major: col*6 + row
+                    val ber = errorRates.getOrElse(index) { Double.NaN }
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .border(1.dp, Color.Gray)
+                            .padding(4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = decodedLEDs.getOrElse(index) { "" },
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = if (ber.isNaN() || ber < 0) "—"
+                            else "%.1f%%".format(ber * 100),
+                            fontSize = 9.sp,
+                            color = Color.Gray,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

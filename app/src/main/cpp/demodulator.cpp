@@ -266,7 +266,8 @@ void sortLedsColumnMajor(std::vector<cv::Rect>& leds) {
 
 // Minimum Hamming distance between `decoded` and the cyclic `truth` period,
 // over all starting offsets 0 .. truth.size()-1.
-int minHammingDistance(const std::string& decoded, const std::string& truth) {
+double minHammingDistance(const std::string& decoded) {
+    std::string truth = "1111111101101010011111111101101010011111111101101010101111111101101010101111111110011010";
     if (decoded.find_first_not_of('0') == std::string::npos)
         return 0;
 
@@ -400,8 +401,7 @@ std::vector<std::string> decodeBoard(const cv::Mat& bitmap,
 
         double t = 3.0;
         std::string decodeResult = demodulate(gray, led, otsu, columnsPerSymbol);
-        std::string truth = "1111111101101010011111111101101010011111111101101010101111111101101010101111111110011010";
-        int missed = minHammingDistance(decodeResult, truth);
+        int missed = minHammingDistance(decodeResult);
 
         LOGI("RES: %s ---------- BER: %.1f", decodeResult.c_str(), static_cast<double>(missed)/decodeResult.size());
 
@@ -511,4 +511,16 @@ Java_com_example_demodulator_OpenCVUtils_drawLEDBounds(JNIEnv *env, jobject thiz
     // --- draw in place, then release the bitmap (writes commit on unlock) ---
     drawLedBounds(mat, leds);
     AndroidBitmap_unlockPixels(env, bitmap);
+}
+extern "C"
+JNIEXPORT jdouble JNICALL
+Java_com_example_demodulator_OpenCVUtils_minHammingDistance(JNIEnv *env, jobject thiz,
+                                                            jstring decoded_bits) {
+    // pull the Java string into a std::string
+    const char* chars = env->GetStringUTFChars(decoded_bits, nullptr);
+    std::string decoded(chars);
+    env->ReleaseStringUTFChars(decoded_bits, chars);   // release once you've copied it
+
+    // truth is hardcoded inside minHammingDistance, so just hand it the decode
+    return static_cast<jdouble>(minHammingDistance(decoded));
 }
